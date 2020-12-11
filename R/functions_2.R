@@ -222,7 +222,8 @@ summarise_weighted <- function(data, ref_value = NULL){
       P75         = Hmisc::wtd.quantile(exposure, wcoeff, probs = 0.75),
       P95         = Hmisc::wtd.quantile(exposure, wcoeff, probs = 0.95),
       # % above reference value
-      pctOver     = sum(wcoeff[exposure>ref_value])/sum(wcoeff)
+      pctOver     = sum(wcoeff[exposure>ref_value])/sum(wcoeff),
+      MOE         = ref_value / Mean
     )
   
 }
@@ -250,6 +251,62 @@ label_ref_value <- function(ref_value, ...){
     
     stringr::str_wrap(label, ...)
   } else NULL
+  
+}
+
+
+#' Finds t
+#' @param consumption The consumption data.
+#' @param facet String. The facet
+#' @param mtx_levels The mtx_file
+create_facet_table <- function(consumption, facet, description){
+  
+  #facet = "F04"
+  
+  # TODO Check
+  # facet is valid
+  # neededc colums in the dataset
+  
+  facet_description <- NULL
+  
+  if(facet == "F04"){
+    facet_description <- select(description,termCode, facet_name = termExtendedName)
+  }
+  
+  if(facet == "F28"){
+    facet_description <- select(description,termCode, facet_name = termExtendedName)
+  }
+  
+  if(!is.null(facet_description)){
+    
+    consumption %>% 
+      select(ORSUBCODE,RECORDIDENTIFIER, 
+             DAY,
+             FOODEXCODE, ORFOODCODE,
+             AMOUNTFRAW,
+             AMOUNTRECIPE,ENRECIPEDESC,
+             ORFOODNAME, fdx2_name
+      ) %>% 
+      mutate(
+        N = str_count(FOODEXCODE, facet)
+      ) %>% 
+      filter(N>0) %>% 
+      mutate( 
+        facet =  str_extract_all(FOODEXCODE,paste0("(?<=", facet,"\\.)[a-zA-Z0-9]{5}")),
+        #f04 = str_extract_all(FOODEXCODE,"(?<=F04\\.)[a-zA-Z0-9]{5}")
+      ) %>% 
+      unnest_longer(facet) %>% 
+      left_join(
+        facet_description,
+        by = c("facet"= "termCode")
+      ) %>% 
+      filter(!is.na(facet_name))
+    
+    
+  } else {
+    cat("No valid facet\n")
+    
+  }
   
 }
 # Example

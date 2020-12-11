@@ -2,12 +2,14 @@ library(shiny)
 library(shinyTree)
 library(data.tree)
 library(tidyverse)
+library(stringr)
 library(DT)
 library(collapsibleTree)
 library(shinydashboard)
 library(here)
 library(shinycssloaders)
 
+options(shiny.maxRequestSize = 30*1024^2) 
 
 mtx_parent <- readRDS("Data/mtx_parent.rds")
 fdx2_chain_name <- readRDS("Data/fdx2_chain_name.rds")
@@ -17,10 +19,20 @@ mtx_levels <- fdx2_chain_code[c("termCode", "termExtendedName" ,"depth")]
 fdx2_list_simple <- readRDS("Data/fdx2_list_simple.rds")
 fdx2_list_explicit <- readRDS("Data/fdx2_list_explicit.rds")
 
+cooking_facets <- readxl::read_xlsx("Data/COOKING FACETS.xlsx") %>% 
+    select(termExtendedName = PROCESS, termCode=FOODEXCODE, depth = LEVEL)
+
 scenarios <- c("LB", "MB",  "UB")
 
 source("R/functions_2.R", local = TRUE)
 
+
+sub_categories <- c("Additive", "Pesticide", "Veterinary Drug Residue", "Contaminant", "Genotoxic-Carcinogen")
+sub_ref_type <- c("Acceptable Intake", "Tolerable Intake", "Provisional Maximum Tolerable Intake", "Benchmark Dose Level (BMDL)")
+sub_frequency <- c("DAILY"  =  1, "WEEKLY"  = 7)
+
+vars_needed_occurrenceFdx2 <- c("termCode", "termExtendedName", "level", "N", "LB_mean", "LB_median", "MB_mean", "MB_median", "UB_mean", "UB_median")
+vars_needed_consumptionFdx2 <- c("SERIAL", "SUBJECTID", "DAY", "FOODEX1", "FOODEX1_name", "AMOUNTFOOD", "FOODNAME", "FOODEXCODE", "GENDER", "AGE", "WEIGHT", "AREA", "POP_CLASS", "WCOEFF")
 
 occurrence_summary <- list(
     #N      = ~n(),
@@ -37,7 +49,7 @@ occurrence_summary <- list(
 # RAW DATASETS.
 # As exported from Lims
 occurrence_raw <- readxl::read_xlsx(
-    "Data/FC_IMPRORISK_METALS_2016_2017.xlsx"
+    "Data/FC_IMPRORISK_LEAD_2016_2017.xlsx"
 ) %>%
     mutate(
         termCode = str_extract(foodex2, "^.{5}")
@@ -45,21 +57,30 @@ occurrence_raw <- readxl::read_xlsx(
     left_join(mtx_levels, by = "termCode") %>%
     filter(!is.na(termCode))
 
+occurrence_raw_name <- "FC_IMPRORISK_LEAD_2016_2017.xlsx"
+
+
 # As is from EU MENU
 consumption_raw <- 
     readxl::read_xlsx(
-        "Data/Consumption_EUMENU_mapped_fdx2_fdx1 Lot1.xlsx"
+        "Data/sample-Consumption_EUMENU_Lot1.xlsx"
     )
 
+consumption_raw_name <- "sample-Consumption_EUMENU_Lot1.xlsx"
 
-
-substance_name <- "METALS_2016_2017"
 
 # SAMPLE DATASETS. READY FOR SHINY APP
 # Shiny Ready. Fewer variables and renamed.
-consumption_sample <- readRDS("Data/Consumption_EUMENU-FDX2-LOT1.rds")
+consumption_sample <- readRDS("Data/sample-Consumption_EUMENU-FDX2-LOT1.rds")
+
+consumption_name <- "sample-Consumption_EUMENU-FDX2-LOT1"
+
 # As exported from this app. Aggregated
-occurrence_sample <- readxl::read_xlsx("Data/occurrence-METALS_2016_2017.xlsx")
+path_occur <- "Data/ex1.Lead (Pb)-2016_2017.xlsx"
+occurrence_sample <- readxl::read_xlsx(path_occur)
+occurrence_name <- "ex1.Lead (Pb)-2016_2017.xlsx"
+
+sub_name <- readxl::excel_sheets(path_occur)[[1]]
 
 # UI ----------------------------------------------------------------------
 
@@ -68,6 +89,7 @@ ui <- fluidPage(
     # Application title
     titlePanel("Exposure at FoodEx2"),
     shinyWidgets::useShinydashboard(),
+    shinyFeedback::useShinyFeedback(),
     
     sidebarLayout(
         
@@ -77,22 +99,53 @@ ui <- fluidPage(
                          h3("Instructions for each Tab")
                      ),
                      hr(),
-                     h4("Aggregate Occurrence"),
-                     p("Select the food items you wish to aggregate their 
-                       occurrence."),
-                     p(strong("Note:"), "Selecting a food item, the full chain up to level 7 is selected
+                     conditionalPanel(
+                         condition = "input.tabs == 'Aggregate Occurrence'",
+                         h4("Aggregate Raw Occurrence"),
+                         p("Here you create an aggregated occurrence file by food items"),
+                         p("Select the food items you wish to aggregate their occurrence."),
+                         p(strong("Note:"), "Selecting a food item, the full chain up to level 7 is selected
                        therefore use ", code("Overall"), " to select  specific item"),
-                     p("This is to enable selecting a specific food item, and also 
+                         p("This is to enable selecting a specific food item, and also 
                        it's parent item, (or grandparent etc.) and separate aggregations
                        will performed."),
-                     hr(),
-                     h4("Occurrence"),
-                     p("Visualise the hierarchy that exists in your occurrence data"),
-                     p("You can limit the level that is shown"),
-                     p("The size of the circle corresponds to the muber of the immidiate children of the hierarchy"),
-                     hr(),
-                     h4("FoodEx2"),
-                     p("Visualise the full FoodEx2 hierarchy"),
+                         hr(),
+                         fileInput("occurrence_raw_file", "Upload Raw Occurrence", accept = ".xlsx"),
+                         uiOutput("occur_raw_progress_UI")%>% 
+                             shinycssloaders::withSpinner()
+                     ),
+                     conditionalPanel(
+                         condition = "input.tabs == 'Occurrence'",
+                         h4("Occurrence"),
+                         p("Visualise the hierarchy that exists in your occurrence data"),
+                         p("The size of the circle corresponds to the number of the immidiate children of the hierarchy"),
+                         hr()
+                     ),
+                     conditionalPanel(
+                         condition = "input.tabs == 'Exposure'",
+                         h4("Calculate exposure at FoodEx2"),
+                         #p("")
+                         hr(),
+                         fileInput("occurrence_file", "Upload Occurrence", accept = ".xlsx"),
+                         uiOutput("occur_progress_UI")%>% 
+                             shinycssloaders::withSpinner(),
+                         hr(),
+                         fileInput("consumption_file", "Upload consumption",  accept = ".xlsx"),
+                         uiOutput("cons_progress_UI")%>% 
+                             shinycssloaders::withSpinner()
+                     ),
+                     conditionalPanel(
+                         condition = "input.tabs == 'FoodEx2'",
+                         h4("FoodEx2"),
+                         p("Visualise the full FoodEx2 hierarchy"),
+                     ),
+                     conditionalPanel(
+                         condition = "input.tabs == 'Facets'",
+                         h4("Explore Facets"),
+                         p("Explore the Ingreient and Cooking facets"),
+                     )
+                     
+                 
         ),
         
         
@@ -137,11 +190,7 @@ ui <- fluidPage(
                                        
                               ),
                               tabPanel("Occurrence", 
-                                       # selectInput("level", "Show up to Level:", 
-                                       #             as.character(c(1:6)),
-                                       #             selected = "3",
-                                       #             width = "100px"
-                                       # ),
+                                       
                                        collapsibleTreeOutput("exposure_collapsible", height = "1000px")%>% 
                                            shinycssloaders::withSpinner()
                                        
@@ -153,8 +202,11 @@ ui <- fluidPage(
                                        fluidRow(
                                            column(3,
                                                   box(title= "Substance Info", 
+                                                      collapsible = TRUE,
+                                                      collapsed = FALSE,
                                                       #tableOutput("subInfo_exposure"),
-                                                      #tableOutput("tbl_consumption"),
+                                                      uiOutput("substance_infoUI") %>% 
+                                                          shinycssloaders::withSpinner(),
                                                       width = NULL
                                                   ),
                                                   box(title="Exposure Statistics (μg/Kg b.w.)", 
@@ -250,6 +302,29 @@ ui <- fluidPage(
                                        collapsibleTreeOutput("foodex2_collaps", height = "900px" )%>% 
                                            shinycssloaders::withSpinner()
                                        
+                              ),
+                              tabPanel("Facets",
+                                       box(width = 10,
+                                           title = h4("Explore the Facets in each food item"),
+                                           tabBox(width = NULL,
+                                                  
+                                                  tabPanel("Ingredients",
+                                                           DTOutput("facet_ingredient")  %>% 
+                                                               shinycssloaders::withSpinner(),
+                                                           downloadButton("down_ingredients", "Download")
+                                                  ),
+                                                  tabPanel("Cooking",
+                                                           DTOutput("facet_cooking")  %>% 
+                                                               shinycssloaders::withSpinner(),
+                                                           downloadButton("down_cooking", "Download")
+                                                  )
+                                                  
+                                           )
+                                       )
+                                       
+                                      
+                                      
+                                       
                               )
                   )
                   
@@ -273,7 +348,7 @@ server <- function(input, output, session) {
         # initialise with the sample_ files
         #exposure_factor    = if(sample_substance_info$values[5]=="DAILY") {1} else {7},
         #exposure_frequency = sample_substance_info$values[5],
-        ref_value          = 0.05,#as.numeric(sample_substance_info$values[3]),
+        #ref_value          = 0.05,#as.numeric(sample_substance_info$values[3]),
         #ref_value_type     = sample_substance_info$values[4],
         #sample_size        = nrow(sample_tbl_subjects) , 
         #pop_size           = sum(sample_tbl_subjects$wcoeff),
@@ -287,15 +362,25 @@ server <- function(input, output, session) {
         
         
         #substance_info = sample_substance_info,
-        exp_label = "μg/Kg body weight"
+        exp_label = "μg/Kg body weight",
+        
+        tbl_stats_caption = "the cption"
     )
     
+    dt_name <- reactiveValues(
+        
+        occurrence_raw = occurrence_raw_name,
+        occurrence = occurrence_name,
+        
+        consumption_raw = consumption_raw_name,
+        consumption  = consumption_name
+    )
     
     datasets <- reactiveValues(
         
         occurrence_raw = occurrence_raw,  # As exported from LIMS
         
-        occurrence = occurrence_sample,
+        occurrence = occurrence_sample, # Shiny ready. Aggregated
         
         consumption_raw = consumption_raw, # Like EU MENU. All info there
         
@@ -305,7 +390,62 @@ server <- function(input, output, session) {
         placeholder  = NULL
     )
     
-    occur_nodes <- reactive({get_occurrence_nodes(datasets$occurrence_raw)})
+    
+    substance_info <- reactiveValues(
+        
+        name = sub_name, #"Lead (Pb)",
+        category = "Contaminant",
+        ref_value = 0.15,
+        type = "Benchamark Dose Level (BMDL)",
+        frequency= "DAILY"
+        
+    )
+    
+    
+    
+    output$substance_infoUI <- renderUI({
+        
+        tagList(
+            tags$table(
+                tags$tr(width = "100%",
+                        tags$td(width = "60%", div(style = "font-size:14px;", "Chemical Substance")),
+                        tags$td(width = "40%", textInput(inputId = "substance_name", value = substance_info$name, label = NULL))),
+                tags$tr(width = "100%",
+                        tags$td(width = "60%", tags$div(style = "font-size:14pX;", "Substance Category")),
+                        tags$td(width = "40%", selectInput(inputId = "substance_category", 
+                                                           selected = substance_info$category, 
+                                                           choices = sub_categories,
+                                                           label = NULL))),
+                tags$tr(width = "100%",
+                        tags$td(width = "60%", tags$div(style = "font-size:14pX;", "Reference value (μg/Kg bw)")),
+                        tags$td(width = "40%", numericInput(inputId = "substance_refValue", 
+                                                            value = substance_info$ref_value, 
+                                                            min  = 0,
+                                                            label = NULL))),
+                tags$tr(width = "100%",
+                        tags$td(width = "60%", tags$div(style = "font-size:14pX;", "Type of reference value")),
+                        tags$td(width = "40%", selectInput(inputId = "substance_type", 
+                                                           selected = substance_info$type, 
+                                                           choices = sub_ref_type,
+                                                           label = NULL))),
+                tags$tr(width = "100%",
+                        tags$td(width = "60%", tags$div(style = "font-size:14pX;", "Frequency")),
+                        tags$td(width = "40%", selectInput(inputId = "substance_frequency", 
+                                                           selected = substance_info$frequency, 
+                                                           choices = sub_frequency,
+                                                           label = NULL)))
+            )
+            
+            
+        )
+    })
+    
+    
+    occur_nodes <- reactive({
+        
+        get_occurrence_nodes(datasets$occurrence_raw)
+        
+        })
     
     node_counts <- reactive(occur_nodes()$node_counts)
     occurrence_tree_code <- reactive(occur_nodes()$occurrence_tree_code)
@@ -316,6 +456,140 @@ server <- function(input, output, session) {
     
     
     
+    #Read Files ####
+    
+    output$occur_raw_progress_UI <- renderUI({
+        
+        validate(
+            need(input$occurrence_raw_file, "Import the Raw occurrence in .xlsx format")
+        )
+        
+        file_type <- tools::file_ext(input$occurrence_raw_file$name)
+        
+        if(!file_type == "xlsx") {
+            error_notExcel()
+            validate("!Please import an .xlsx file")
+        }
+        
+        path  = input$occurrence_raw_file$datapath
+        data <-  readxl::read_xlsx(path)
+        #check_varsOccurrenceFdx2(data, vars_needed_occurrenceFdx2)
+        
+        substance_name <- readxl::excel_sheets(path)[[1]] 
+        
+        #ALL OK (lets say..)
+        show_success_alert("Occurence data are all set")
+        
+        # Update the occurence relevant files
+        datasets$occurrence_raw <- data %>%
+            mutate(
+                termCode = str_extract(foodex2, "^.{5}")
+            ) %>%
+            left_join(mtx_levels, by = "termCode") %>%
+            filter(!is.na(termCode))
+        
+        dt_name$occurrence_raw <- input$occurrence_raw_file$name
+        
+        #  after i Update the files!!!
+        # because the below trigger the calculations
+        #valid_occurrence_file(TRUE)
+        
+        tagList(
+            p(paste0("Dataset: ", dt_name$occurrence_raw)),
+            h4("Your Raw Occurrence data have been checked and succesfully uploaded",style= "colour: '#3CB371'")
+        )
+        
+        
+    })
+    
+    output$occur_progress_UI <- renderUI({
+        
+        
+        validate(
+            need(input$occurrence_file, "Import the occurrence in .xlsx format")
+        )
+        
+        # Is it an Excel file?
+        file_type <- tools::file_ext(input$occurrence_file$name)
+        
+        if(!file_type == "xlsx") {
+            
+            error_notExcel()
+            validate("!Please import an .xlsx file")
+        }
+        
+        # Correct sheets?
+        #check_sheets_occur(input$occurrence_file$datapath)
+        
+        # OK, read and perform checks inside the sheet
+        path  = input$occurrence_file$datapath
+        
+        data <-  readxl::read_xlsx(path)
+        check_varsOccurrenceFdx2(data, vars_needed_occurrenceFdx2)
+        
+        substance_name <- readxl::excel_sheets(path)[[1]] 
+        
+        # not really needed beacuse I use the level 3 fro mappings, but lets
+        #check_fdx1_descr(Level3, "level2")
+        
+        #ALL OK (lets say..)
+        show_success_alert("Occurence data are all set")
+        
+        # Update the occurence relevant files
+        datasets$occurrence <- data
+        substance_info$name <- substance_name
+        dt_name$occurrence <- input$occurrence_file$name
+        #  after i Update the files!!!
+        # because the below trigger the calculations
+        #valid_occurrence_file(TRUE)
+        
+        tagList(
+            p(paste0("Dataset: ", dt_name$occurrence)),
+            h4("Your Occurrence data have been checked and succesfully uploaded",style= "colour: '#3CB371'")
+        )
+        
+        
+    })
+    
+    
+    output$cons_progress_UI <- renderUI({
+        
+        validate(
+            need(input$consumption_file, "Import the consumption in .xlsx format")
+        )
+        
+        file_type <- tools::file_ext(input$consumption_file$name)
+        
+        if(!file_type == "xlsx") {
+            
+            error_notExcel()
+            validate("!Please import an .xlsx file")
+        }
+        
+        path = input$consumption_file$datapath
+        
+        data <- readxl::read_xlsx(path)
+        
+        # Perform checks
+        check_varsConsumptionFdx2(data, vars_needed_consumptionFdx2)
+        #check_fdx1_coding(Consumption)
+        check_fewRows(data)
+        
+        datasets$consumption <- data
+        dt_name$consumption <- input$consumption_file$name
+        
+        # After I update the file
+        #since the following triggers calculation
+        #valid_consumption_file(TRUE)
+        
+        tagList(
+            p(paste0("Dataset: ", dt_name$consumption)),
+            tags$h4("Your Consumption data have been checked and succesfully uploaded",style= "colour: '#3CB371'")
+        )
+        
+    })
+    
+    #  ffff####
     
     output$fdx2_simple <- renderTree({
         
@@ -363,12 +637,17 @@ server <- function(input, output, session) {
     
     output$occurrence_TreeList <- renderTree({
         
+        datasets$occurrence_raw
         occurrence_TreeList()
         
     })
     
     
     occurrence_selections <- reactive({
+        
+        #dependency on new file
+        datasets$occurrence_raw
+        
         
         occur_list <- shinyTree::get_selected(input$occurrence_TreeList,format = "names")
         
@@ -474,7 +753,7 @@ server <- function(input, output, session) {
             
             #"occurence_selected.rds"
             # substace_name can be a reactive? see ?downloadHandler
-            paste0("occurrence-", substance_name, ".xlsx")
+            paste0("occurrence-", dt_name$occurrence_raw, ".xlsx")
         },
         
         content = function(file){
@@ -483,6 +762,112 @@ server <- function(input, output, session) {
             writexl::write_xlsx(occurrence_template(), path = file)
         }
     )
+    
+    output$down_ingredients <- downloadHandler(
+        
+        
+        filename = function(){
+            
+            #"occurence_selected.rds"
+            # substace_name can be a reactive? see ?downloadHandler
+            paste0("FACETS-INGREDIENTS-", dt_name$consumption_raw, ".xlsx")
+        },
+        
+        content = function(file){
+            
+            #saveRDS(occur_sel(),file)
+            writexl::write_xlsx(facet_ingredient(), path = file)
+        }
+    )
+    
+    output$down_cooking <- downloadHandler(
+        
+        
+        filename = function(){
+            
+            #"occurence_selected.rds"
+            # substace_name can be a reactive? see ?downloadHandler
+            paste0("FACETS-COOKING-", dt_name$consumption_raw, ".xlsx")
+        },
+        
+        content = function(file){
+            
+            #saveRDS(occur_sel(),file)
+            writexl::write_xlsx(facet_cooking(), path = file)
+        }
+    )
+    
+    # FACETS ####
+    
+    facet_ingredient <- reactive({
+        
+        
+        create_facet_table(datasets$consumption_raw,"F04", mtx_levels) %>% 
+            mutate(
+                across(!contains("AMOUNT"), factor)
+            )
+        
+    })
+    
+    output$facet_ingredient_count <- renderTable({
+        
+        facet_ingredient() %>% 
+            count(facet, facet_name, sort = TRUE)
+    })
+    
+    
+    output$facet_ingredient <- renderDT({
+        
+        facet_ingredient() %>% 
+            relocate(FOODEXCODE, .after = last_col()) %>% 
+            datatable(
+                caption = "Ingredient Facets",
+                style = "bootstrap",
+                filter = 'top',
+                options = list(
+                    pageLength = 30,
+                    autoWidth = TRUE,
+                    #paging = FALSE,
+                    scrollX = TRUE, scrollY = "600px"
+                )
+                
+            )
+    })
+    
+    facet_cooking <- reactive({
+        
+        
+        create_facet_table(datasets$consumption_raw,"F28", cooking_facets) %>% 
+            mutate(
+                across(!contains("AMOUNT"), factor)
+            )
+        
+        
+    })
+    
+    output$facet_cooking_count <- renderTable({
+        
+        facet_cooking() %>% 
+            count(facet, facet_name, sort = TRUE)
+    })
+    
+    output$facet_cooking <- renderDT({
+        
+        facet_cooking() %>% 
+            relocate(FOODEXCODE, .after = last_col()) %>% 
+            datatable(
+                caption = "Cooking Facets",
+                style = "bootstrap",
+                filter = 'top',
+                options = list(
+                    pageLength = 30,
+                    autoWidth = TRUE,
+                    #paging = FALSE,
+                    scrollX = TRUE, scrollY = "600px"
+                )
+                
+            )
+    })
     
     
     
@@ -527,7 +912,9 @@ server <- function(input, output, session) {
     
     tbl_exposure <- reactive({
         
-        create_tbl_exposure_fdx2(tbl_merged(), tbl_subjects(), 1)
+        req(input$substance_frequency)
+        exposure_factor <- as.numeric(input$substance_frequency)
+        create_tbl_exposure_fdx2(tbl_merged(), tbl_subjects(), exposure_factor)
         
     })
     
@@ -540,10 +927,12 @@ server <- function(input, output, session) {
     tbl_exposure_stats <- reactive({
         
         #req(input$digits_exposure)
+        req(tbl_exposure())
         
         digits  <- input$digits_exposure
-        ref_value <- rv$ref_value
+        ref_value <- input$substance_refValue  #substance_info$ref_value
         
+        tbl_stats <- 
         tbl_exposure() %>% 
             tidyr::pivot_longer(
                 cols = starts_with("subExp_"),
@@ -561,20 +950,32 @@ server <- function(input, output, session) {
                 ~stringr::str_remove(., "subExp_"),
                 dplyr::starts_with("subExp_")
             ) 
+        
+        if(input$substance_type == "Benchmark Dose Level (BMDL)"){
+            tbl_stats <- tbl_stats %>% filter(key != "pctOver")
+        } else {
+            tbl_stats <- tbl_stats %>% filter(key != "MOE")
+        }
+        tbl_stats
     })
     
     output$tbl_exposure_stats <- renderTable({
         
-        #style the pctOver row
-        ind <- match("pctOver",tbl_exposure_stats()$key)
-        
+            
+        # if( input$substance_type == "Benchmark Dose Level (BMDL)"){
+        #     as.character(p(br(),"MOE: Margin of Exposure"))
+        # } else {
+        #     as.character(p(br(),"pctOver: % of population over the reference value"))
+        # }
+        # 
         tbl_exposure_stats()%>% 
             data.frame(row.names = "key")
         
     }
     ,rownames = TRUE
     #,digits = function() input$digits_exposure
-    ,caption = as.character(p(br(),"pctOver: % of population over the reference value"))
+    #,caption = caption #as.character(p(br(),"pctOver: % of population over the reference value"))
+    , caption = NULL #function()rv$tbl_stats_caption %>% as.character()
     )
     
     # Graphs ####
@@ -582,7 +983,7 @@ server <- function(input, output, session) {
         
         req(input$slct_scenario_exposure)
         
-        ref_value  <- rv$ref_value%||%NA_real_  #NULL ref_value brakes down the plot. Thanks @_ColinFay
+        #ref_value  <- input$substance_refValue #substance_info$ref_value%||%NA_real_  #NULL ref_value brakes down the plot. Thanks @_ColinFay
         scenario   <- input$slct_scenario_exposure
         
         var_to_use <- paste0("subExp_",scenario)
@@ -597,7 +998,7 @@ server <- function(input, output, session) {
         add_stats  <- input$show_stats_exposure
         
         validate(
-            need(n.breaks>5 && n.breaks <=  30, 
+            need(n.breaks>=5 && n.breaks <=  30, 
                  glue::glue(
                      "# of breaks should be:>=  {5} and <= {30}"
                  )
@@ -641,7 +1042,7 @@ server <- function(input, output, session) {
             NULL
         
         
-        #catch_plotError(exp_plot)
+        catch_plotError(exp_plot)
         
         exp_plot
         
@@ -656,7 +1057,7 @@ server <- function(input, output, session) {
     
     exposure_cdf <- reactive({
         
-        ref_value <- rv$ref_value
+        ref_value <- input$substance_refValue #substance_info$ref_value
         
         scenario <- input$slct_scenario_exposure
         var_to_use <- paste0("subExp_",scenario)
@@ -677,7 +1078,7 @@ server <- function(input, output, session) {
             )+
             NULL
         
-        #catch_plotError(cdf_plot)
+        catch_plotError(cdf_plot)
         
         cdf_plot
     })
