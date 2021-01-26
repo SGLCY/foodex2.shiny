@@ -38,9 +38,11 @@ create_tbl_subjects_fdx2 <- function(consumption, ...){
 
 #'@param consumption A tibble of the consumption 
 #'@param occurrence A tibble of the aggregated occurrence
+#'@param fdx2_chain_hierararchy The fdx2 hierarchy as a tible. In the internal datasets
+#'@param mtx_levels The  fdx2 levels.Internal dataset
 #'@param ... Unused yet
 #'@details case_when rocks! First checks for level 7, then level 6, etc..
-#' Always the lowest level is preferred in case we have occurrenc from the parent of an item
+#' Always the lowest level is preferred in case we have occurrence from the parent of an item
 #'@noRd
 create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararchy,mtx_levels,...){
   
@@ -57,7 +59,7 @@ create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararc
     ) %>% 
     rename_all(tolower)
   
-  # Add foodex levels
+  #' Add foodex levels
   #' Indicate the `level` and `termCode` for each food occassion.
   #' Extract these from what is indicted in the `occurrence` dataset 
   with_foodex <- 
@@ -93,20 +95,19 @@ create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararc
       , by = c("level_used" = "level", "termCode_used" = "termCode")
     ) 
   
-  
   # Merged ####
   
   merged <- 
     with_occurrence %>% 
     
-    # Exposure L2 at each food consumptio occassion
+    # Exposure at each food consumptio occassion
     mutate(
       meal_exp_mean_LB = amountfood * LB_mean / weight,
       meal_exp_mean_MB = amountfood * MB_mean / weight,
       meal_exp_mean_UB = amountfood * UB_mean / weight
     ) %>% 
     
-    # #Exposure L3 at each food consumption occassion
+    # #Exposure after cooking facet
     # 
     # mutate(
     #   l3_meal_exp_mean_LB	= amountfood * LB_mean_l3 / weight,
@@ -141,7 +142,7 @@ create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararc
     #                                 foodex_l3_desc)
     # ) 
   
-  #return
+  # return
   merged
   
 }
