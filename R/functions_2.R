@@ -261,7 +261,7 @@ label_ref_value <- function(ref_value, ...){
 #' @param description A tibble with termCode, termExtendedName for the facet. Can my mtx_levels
 #' for the ingredients or a kew table for the processs facets with the same column names
 create_facet_table <- function(consumption, facet, description){
-  #browser()
+  
   #facet = "F04"
   
   # TODO Check
@@ -310,6 +310,94 @@ create_facet_table <- function(consumption, facet, description){
   }
   
 }
+
+#' Function to create a separate tiblle of consumption  with only the Process facets from occurence that match
+#' @param consumption  The shiny ready consumption file
+#' @param occurrence Aggregated occurrence with facet in it
+#' @param facet_description A tible with termcode, termExtenedName
+#' @param fcode String. The face Fcode, i.e. F28
+get_occurrence_process <- function(consumption, occurrence, facet_description, fcode) {
+  #browser()
+  facet_description <- 
+    select(facet_description,
+           termcode = termCode, 
+           facet_name = termExtendedName)
+  
+  consumption <-
+    consumption %>%
+    rename_all(tolower)
+  
+  consumption_wt_processFacets <- 
+    consumption %>% 
+    mutate(
+      termcode =  str_extract(foodexcode, "^.{5}"),
+      .before =  1
+    ) %>% 
+    mutate(
+      N = str_count(foodexcode, fcode)# "F28")
+    ) %>% 
+    filter(N>0) %>% 
+    mutate( 
+      facet =  str_extract_all(foodexcode,paste0("(?<=", fcode,"\\.)[a-zA-Z0-9]{5}")),
+      #f04 = str_extract_all(FOODEXCODE,"(?<=F04\\.)[a-zA-Z0-9]{5}")
+    ) 
+  
+  
+  with_process <- 
+    consumption_wt_processFacets %>%
+    # keep the column , I need it
+    mutate(facets = facet) %>% 
+    unnest_longer(facet) %>%
+    left_join(
+      facet_description,
+      by = c("facet"= "termcode")
+    ) %>%
+    mutate(facet = glue::glue("{termcode}#{fcode}.{facet}")) %>% 
+    left_join(
+      occurrence %>% 
+        rename(facet_user_des = termExtendedName) %>% 
+        select(-any_of(c("N"))) 
+      , by = c("facet" = "termCode")
+    ) %>% 
+    filter(!is.na(coalesce(across(matches("LB|MB|LB"))))) %>% 
+    {.}
+  
+  
+  # with_process %>% 
+  #   janitor::get_dupes(SERIAL)
+  
+  
+  #  Only 1 F28 for a food item
+  # check if the user supplied two F28 for the same food item
+  dup_rows <- with_process[duplicated(with_process$serial),]
+  
+  if(nrow(dup_rows)>0) {
+    # not ok
+    dups <- paste(dup_rows$serial, collapse = ",")
+    message("Not OK. Check Serials: \n", dups)
+    # Show the table and the SERIAL ids
+  } else {
+    #ok
+    cat("No  dupes\n")
+  }
+  
+  # prepre a tibble to left join the consumption
+  # Remenber If and only If, there are no DUPES in termsof F28
+  
+  tbl_process <- 
+    with_process %>% 
+    select(serial,
+           facet,facets, facet_name, 
+           facet_user_des,
+           facet_level = level,
+           ends_with("mean")
+    ) %>% 
+    rename_with(~paste0(., "_",fcode), .cols= ends_with("mean"))
+  
+  tbl_process
+}
+
+
 # Example
 # cadmium_tree <- readRDS(here("SampleData/cadmium_tree.rds"))
 # 

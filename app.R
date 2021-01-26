@@ -23,7 +23,7 @@ fdx2_list_explicit <- readRDS("Data/fdx2_list_explicit.rds")
 cooking_facets <- readxl::read_xlsx("Data/COOKING FACETS.xlsx") %>%
     select(termExtendedName = PROCESS, termCode=FOODEXCODE, depth = LEVEL)
 
-process_facets <- readRDS("Data/process_facets.rds")
+process_facets <- readRDS("Data/F28_facets.rds")
 
 scenarios <- c("LB", "MB",  "UB")
 
@@ -113,6 +113,7 @@ ui <- fluidPage(
                          p("This is to enable selecting a specific food item, and also 
                        it's parent item, (or grandparent etc.) and separate aggregations
                        will performed."),
+                         p(strong("This tab needs"), code("RAW OCCURENCE DATA"),strong("from your LIMS system")),
                          hr(),
                          fileInput("occurrence_raw_file", "Upload Raw Occurrence", accept = ".xlsx"),
                          uiOutput("occur_raw_progress_UI")%>% 
@@ -121,16 +122,18 @@ ui <- fluidPage(
                      conditionalPanel(
                          condition = "input.tabs == 'Occurrence'",
                          h4("Occurrence"),
-                         p("Visualise the hierarchy that exists in your occurrence data"),
+                         p("Visualise the hierarchy that exists in your", code("RAW occurrence data"), "from your LIMS system"),
                          p("The size of the circle corresponds to the number of the immidiate children of the hierarchy"),
                          hr()
                      ),
                      conditionalPanel(
                          condition = "input.tabs == 'Exposure'",
                          h4("Calculate exposure at FoodEx2"),
+                         p("This tab needs 2 datasets to work:", "The", code("Aggregated Occurrence"), "and the ", code("Consumption data"), 
+                           "you have prepared according to the guidelines"),
                          #p("")
                          hr(),
-                         fileInput("occurrence_file", "Upload Occurrence", accept = ".xlsx"),
+                         fileInput("occurrence_file", "Upload Aggregated Occurrence", accept = ".xlsx"),
                          uiOutput("occur_progress_UI")%>% 
                              shinycssloaders::withSpinner(),
                          hr(),
@@ -144,9 +147,10 @@ ui <- fluidPage(
                          p("Visualise the full FoodEx2 hierarchy"),
                      ),
                      conditionalPanel(
-                         condition = "input.tabs == 'Facets'",
+                         condition = "input.tabs == 'Explore Facets'",
                          h4("Explore Facets"),
-                         p("Explore the Ingreient and Cooking facets"),
+                         p("Explore the Ingredient (F04) and PROCESS (F28) facets in your datasets"),
+                         p("The Consumption and the aggregated occurence datasets you have uploaded")
                      )
                      
                  
@@ -163,6 +167,12 @@ ui <- fluidPage(
                               #          
                               #          #shinyTree("fdx2_explicit", checkbox = TRUE)
                               # ),
+                              tabPanel("FoodEx2",
+                                       
+                                       collapsibleTreeOutput("foodex2_collaps", height = "900px" )%>% 
+                                           shinycssloaders::withSpinner()
+                                       
+                              ),
                               
                               tabPanel("Aggregate Occurrence",
                                        
@@ -301,27 +311,28 @@ ui <- fluidPage(
                                        ) #  fluidRow
                                        
                               ),
-                              tabPanel("FoodEx2",
-                                       
-                                       collapsibleTreeOutput("foodex2_collaps", height = "900px" )%>% 
-                                           shinycssloaders::withSpinner()
-                                       
-                              ),
-                              tabPanel("Facets",
+                              tabPanel("Explore Facets",
                                        box(width = 10,
                                            title = h4("Explore the Facets in each food item"),
                                            tabBox(width = NULL,
                                                   
                                                   tabPanel("Ingredients",
-                                                           DTOutput("facet_ingredient")  %>% 
+                                                           DTOutput("facet_ingredient_count")%>% 
                                                                shinycssloaders::withSpinner(),
-                                                           DTOutput("facet_ingredient_count"),
-                                                           downloadButton("down_ingredients", "Download")
+                                                           # DTOutput("facet_ingredient")  %>% 
+                                                           #     shinycssloaders::withSpinner(),
+                                                           fluidRow(
+                                                               downloadButton("down_ingredients_unique", "Download Counts"),
+                                                               downloadButton("down_ingredients", "Download All Observations")
+                                                               
+                                                           )
+                                                           
                                                   ),
-                                                  tabPanel("Cooking",
-                                                           DTOutput("facet_cooking")  %>% 
+                                                  tabPanel("Process",
+                                                           DTOutput("facet_process_count") %>%
                                                                shinycssloaders::withSpinner(),
-                                                           downloadButton("down_cooking", "Download")
+                                                           # DTOutput("facet_cooking")  %>% 
+                                                           downloadButton("down_process", "Download")
                                                   )
                                                   
                                            )
@@ -769,6 +780,23 @@ server <- function(input, output, session) {
         }
     )
     
+    output$down_ingredients_unique <- downloadHandler(
+        
+        
+        filename = function(){
+            
+            #"occurence_selected.rds"
+            # substace_name can be a reactive? see ?downloadHandler
+            paste0("FACETS-UNIQUE-INGREDIENTS-", dt_name$consumption, ".xlsx")
+        },
+        
+        content = function(file){
+            
+            #saveRDS(occur_sel(),file)
+            writexl::write_xlsx(facet_ingredient_count(), path = file)
+        }
+    )
+    
     output$down_ingredients <- downloadHandler(
         
         
@@ -776,7 +804,7 @@ server <- function(input, output, session) {
             
             #"occurence_selected.rds"
             # substace_name can be a reactive? see ?downloadHandler
-            paste0("FACETS-INGREDIENTS-", dt_name$consumption_raw, ".xlsx")
+            paste0("FACETS-INGREDIENTS-", dt_name$consumption, ".xlsx")
         },
         
         content = function(file){
@@ -786,20 +814,20 @@ server <- function(input, output, session) {
         }
     )
     
-    output$down_cooking <- downloadHandler(
+    output$down_process <- downloadHandler(
         
         
         filename = function(){
             
             #"occurence_selected.rds"
             # substace_name can be a reactive? see ?downloadHandler
-            paste0("FACETS-COOKING-", dt_name$consumption_raw, ".xlsx")
+            paste0("FACETS-PROCESS-", dt_name$consumption, ".xlsx")
         },
         
         content = function(file){
             
             #saveRDS(occur_sel(),file)
-            writexl::write_xlsx(facet_cooking(), path = file)
+            writexl::write_xlsx(facet_process_count(), path = file)
         }
     )
     
@@ -810,15 +838,15 @@ server <- function(input, output, session) {
     
     facet_ingredient <- reactive({
         
-        create_facet_table(datasets$consumption_raw,"F04", mtx_levels) %>% 
-            select(ORSUBCODE,RECORDIDENTIFIER,
-                   DAY,
-                   FOODEXCODE, ORFOODCODE,
-                   AMOUNTFRAW,
-                   AMOUNTRECIPE,ENRECIPEDESC,
-                   ORFOODNAME, fdx2_name,
-            facet, facet_name
-            ) %>%
+        create_facet_table(datasets$consumption,"F04", mtx_levels) %>% 
+            # select(ORSUBCODE,RECORDIDENTIFIER,
+            #        DAY,
+            #        FOODEXCODE, ORFOODCODE,
+            #        AMOUNTFRAW,
+            #        AMOUNTRECIPE,ENRECIPEDESC,
+            #        ORFOODNAME, fdx2_name,
+            # facet, facet_name
+            # ) %>%
             mutate(
                 across(!contains("AMOUNT"), factor)
             )
@@ -849,12 +877,12 @@ server <- function(input, output, session) {
     facet_ingredient_count <- reactive({
         
         facet_ingredient() %>% 
-            count(facet, facet_name, fdx2_name,  sort = TRUE) %>% 
+            count(facet, facet_name, FOODNAME,  sort = TRUE) %>% 
             janitor::get_dupes(facet) %>% 
             select(
-                Facet = facet,
-                Ingredient = facet_name,
-                'FoodEx2 Name' = fdx2_name,
+                'Ingredient Facet' = facet,
+                 Ingredient = facet_name,
+                'Found in FoodEx2 Name' = FOODNAME,
                 "N occassions" = n
             )
     })
@@ -862,7 +890,7 @@ server <- function(input, output, session) {
     output$facet_ingredient_count <- renderDT({
         facet_ingredient_count() %>% 
             datatable(
-                caption = "Ingredient Facets",
+                caption = "Unique Ingredient Facets within each FoodEx2 name",
                 style = "bootstrap",
                 filter = 'top',
                 rownames = FALSE,
@@ -877,10 +905,10 @@ server <- function(input, output, session) {
         })
     
     # Cooking
-    facet_cooking <- reactive({
+    facet_process <- reactive({
         
         
-        create_facet_table(datasets$consumption_raw,"F28", cooking_facets) %>% 
+        create_facet_table(datasets$consumption,"F28", process_facets) %>% 
             mutate(
                 across(!contains("AMOUNT"), factor)
             )
@@ -888,18 +916,43 @@ server <- function(input, output, session) {
         
     })
     
-    output$facet_cooking_count <- renderTable({
+    facet_process_count <- reactive({
         
-        facet_cooking() %>% 
-            count(facet, facet_name, sort = TRUE)
+        
+        facet_process() %>% 
+            count(facet, facet_name, FOODNAME, sort = TRUE) %>% 
+            select(
+                'Process Facet' = facet,
+                Process = facet_name,
+                'Found in FoodEx2 Name' = FOODNAME,
+                "N occassions" = n
+            )
+        
     })
     
-    output$facet_cooking <- renderDT({
+    output$facet_process_count <- renderDT({
         
-        facet_cooking() %>% 
+        facet_process_count() %>% 
+            datatable(
+                caption = "Unique Processing Facets (within FOODNAME) in the Consumption data",
+                style = "bootstrap",
+                filter = 'top',
+                options = list(
+                    pageLength = 30,
+                    autoWidth = TRUE,
+                    #paging = FALSE,
+                    scrollX = TRUE, scrollY = "600px"
+                )
+                
+            )
+    })
+    
+    output$facet_process <- renderDT({
+        
+        facet_process() %>% 
             relocate(FOODEXCODE, .after = last_col()) %>% 
             datatable(
-                caption = "Cooking Facets",
+                caption = "Process Facets",
                 style = "bootstrap",
                 filter = 'top',
                 options = list(
@@ -944,7 +997,7 @@ server <- function(input, output, session) {
     
     tbl_merged <- reactive({
         
-        create_tbl_merged_fdx2(tbl_consumption(), tbl_occurrence(), fdx2_chain_hierararchy, mtx_levels)
+        create_tbl_merged_fdx2(tbl_consumption(), tbl_occurrence(), fdx2_chain_hierararchy, mtx_levels, process_facets)
         
     })
     

@@ -40,11 +40,13 @@ create_tbl_subjects_fdx2 <- function(consumption, ...){
 #'@param occurrence A tibble of the aggregated occurrence
 #'@param fdx2_chain_hierararchy The fdx2 hierarchy as a tible. In the internal datasets
 #'@param mtx_levels The  fdx2 levels.Internal dataset
+#'@param process_facets The F28 facets
 #'@param ... Unused yet
 #'@details case_when rocks! First checks for level 7, then level 6, etc..
 #' Always the lowest level is preferred in case we have occurrence from the parent of an item
 #'@noRd
-create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararchy,mtx_levels,...){
+create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararchy,mtx_levels,
+                                   process_facets,...){
   
   occur <- occurrence
   consumption <- 
@@ -57,7 +59,8 @@ create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararc
       fdx2_chain_hierararchy
       , by = "termCode"
     ) %>% 
-    rename_all(tolower)
+    rename_all(tolower) %>% 
+    {.}
   
   #' Add foodex levels
   #' Indicate the `level` and `termCode` for each food occassion.
@@ -95,11 +98,16 @@ create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararc
       , by = c("level_used" = "level", "termCode_used" = "termCode")
     ) 
   
+  tbl_process <- get_occurrence_process(consumption, occur, process_facets, "F28")
+  
+  with_process <- 
+    with_occurrence %>% 
+    left_join(tbl_process)
   # Merged ####
   
   merged <- 
-    with_occurrence %>% 
-    
+    #with_occurrence %>% 
+    with_process %>% 
     # Exposure at each food consumptio occassion
     mutate(
       meal_exp_mean_LB = amountfood * LB_mean / weight,
@@ -109,23 +117,23 @@ create_tbl_merged_fdx2 <- function(consumption, occurrence, fdx2_chain_hierararc
     
     # #Exposure after cooking facet
     # 
-    # mutate(
-    #   l3_meal_exp_mean_LB	= amountfood * LB_mean_l3 / weight,
-    #   l3_meal_exp_mean_MB	= amountfood * MB_mean_l3 / weight,
-    #   l3_meal_exp_mean_UB = amountfood * UB_mean_l3 / weight
-    # ) %>% 
+    mutate(
+      F28_meal_exp_mean_LB	= amountfood * LB_mean_F28 / weight,
+      F28_meal_exp_mean_MB	= amountfood * MB_mean_F28 / weight,
+      F28_meal_exp_mean_UB = amountfood * UB_mean_F28 / weight
+    ) %>%
     # 
     # # Refined exposure. If we have info from level 3 then that else from l2
-    # mutate(
-    #   refined_exp_lb = if_else(is.na(LB_mean_l3), meal_exp_mean_LB, l3_meal_exp_mean_LB),
-    #   refined_exp_mb = if_else(is.na(MB_mean_l3), meal_exp_mean_MB, l3_meal_exp_mean_MB),
-    #   refined_exp_ub = if_else(is.na(UB_mean_l3), meal_exp_mean_UB, l3_meal_exp_mean_UB)
-    # ) %>% 
     mutate(
-      refined_exp_lb = meal_exp_mean_LB,
-      refined_exp_mb = meal_exp_mean_MB,
-      refined_exp_ub = meal_exp_mean_UB
-    ) %>% 
+      refined_exp_lb = if_else(is.na(LB_mean_F28), meal_exp_mean_LB, F28_meal_exp_mean_LB),
+      refined_exp_mb = if_else(is.na(MB_mean_F28), meal_exp_mean_MB, F28_meal_exp_mean_MB),
+      refined_exp_ub = if_else(is.na(UB_mean_F28), meal_exp_mean_UB, F28_meal_exp_mean_UB)
+    ) %>%
+    # mutate(
+    #   refined_exp_lb = meal_exp_mean_LB,
+    #   refined_exp_mb = meal_exp_mean_MB,
+    #   refined_exp_ub = meal_exp_mean_UB
+    # ) %>% 
     
     # Adjust by wcoeff
     mutate(
