@@ -44,7 +44,7 @@ get_selected_termCodes <- function(occur_list){
 }
 
 
-#' Creates the tree like df for occurrence and the node couns
+#' Creates the tree like df for occurrence and the node counts
 #' @param occurrence The occurrence dataframe
 #' @details Needs `fdx2_chain_name`, `fdx2_chain_code`
 get_occurrence_nodes <- function(occurrence){
@@ -258,9 +258,10 @@ label_ref_value <- function(ref_value, ...){
 #' Finds t
 #' @param consumption The consumption data.
 #' @param facet String. The facet
-#' @param mtx_levels The mtx_file
+#' @param description A tibble with termCode, termExtendedName for the facet. Can my mtx_levels
+#' for the ingredients or a kew table for the processs facets with the same column names
 create_facet_table <- function(consumption, facet, description){
-  
+  #browser()
   #facet = "F04"
   
   # TODO Check
@@ -280,13 +281,13 @@ create_facet_table <- function(consumption, facet, description){
   if(!is.null(facet_description)){
     
     consumption %>% 
-      select(ORSUBCODE,RECORDIDENTIFIER, 
-             DAY,
-             FOODEXCODE, ORFOODCODE,
-             AMOUNTFRAW,
-             AMOUNTRECIPE,ENRECIPEDESC,
-             ORFOODNAME, fdx2_name
-      ) %>% 
+      # select(ORSUBCODE,RECORDIDENTIFIER, 
+      #        DAY,
+      #        FOODEXCODE, ORFOODCODE,
+      #        AMOUNTFRAW,
+      #        AMOUNTRECIPE,ENRECIPEDESC,
+      #        ORFOODNAME, fdx2_name
+      # ) %>% 
       mutate(
         N = str_count(FOODEXCODE, facet)
       ) %>% 
