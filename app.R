@@ -149,8 +149,7 @@ ui <- fluidPage(
                      conditionalPanel(
                          condition = "input.tabs == 'Explore Facets'",
                          h4("Explore Facets"),
-                         p("Explore the Ingredient (F04) and PROCESS (F28) facets in your datasets"),
-                         p("The Consumption and the aggregated occurence datasets you have uploaded")
+                         p("Explore the Ingredient (F04) and PROCESS (F28) facets in your Consumption data"),
                      )
                      
                  
