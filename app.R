@@ -36,6 +36,7 @@ sub_frequency <- c("DAILY"  =  1, "WEEKLY"  = 7)
 
 vars_needed_occurrenceFdx2 <- c("termCode", "termExtendedName", "level", "N", "LB_mean", "LB_median", "MB_mean", "MB_median", "UB_mean", "UB_median")
 vars_needed_consumptionFdx2 <- c("SERIAL", "SUBJECTID", "DAY", "FOODEX1", "FOODEX1_name", "AMOUNTFOOD", "FOODNAME", "FOODEXCODE", "GENDER", "AGE", "WEIGHT", "AREA", "POP_CLASS", "WCOEFF")
+vars_needed_RawOccurrence <- c("foodex2", "res_num", "lod")
 
 occurrence_summary <- list(
     #N      = ~n(),
@@ -94,7 +95,14 @@ ui <- fluidPage(
     titlePanel("Exposure at FoodEx2"),
     shinyWidgets::useShinydashboard(),
     shinyFeedback::useShinyFeedback(),
-    
+    tags$head(
+        tags$style(HTML("
+      .shiny-output-error-col_names {
+        color: #E6353B;
+        font-weight: bold;
+      }
+    "))
+    ),
     sidebarLayout(
         
         sidebarPanel(width = 2,
@@ -488,7 +496,7 @@ server <- function(input, output, session) {
         
         path  = input$occurrence_raw_file$datapath
         data <-  readxl::read_xlsx(path)
-        #check_varsOccurrenceFdx2(data, vars_needed_occurrenceFdx2)
+        check_varsRawOccurrence(data, vars_needed_RawOccurrence)
         
         substance_name <- readxl::excel_sheets(path)[[1]] 
         
@@ -522,6 +530,7 @@ server <- function(input, output, session) {
         
         validate(
             need(input$occurrence_file, "Import the occurrence in .xlsx format")
+            
         )
         
         # Is it an Excel file?
@@ -530,7 +539,7 @@ server <- function(input, output, session) {
         if(!file_type == "xlsx") {
             
             error_notExcel()
-            validate("!Please import an .xlsx file")
+            validate("!Please import an .xlsx file", errorClass = "col_names")
         }
         
         # Correct sheets?

@@ -99,6 +99,9 @@ catch_plotError <- function(plot){
   
 }
 
+# TODO The below three functions (checks) are all the same. Create a single function
+# What were you thinking malaka?
+
 check_varsConsumptionFdx2 <- function(data, vars_needed){
   
   #vars_needed <- vars_needed_consumptionFdx2
@@ -120,8 +123,38 @@ check_varsConsumptionFdx2 <- function(data, vars_needed){
     validate(
       
       glue::glue(
-        "Missing columns in {dt_name}: \n{paste(missing_vars,collapse=', ')}"
+        "Missing columns in {dt_name}: \n{paste(missing_vars,collapse=', ')}
+        \n Have you uploaded the correct data?"
       )
+      , errorClass = "col_names"
+    )
+    
+  }
+  
+}
+
+check_varsRawOccurrence  <- function(data, vars_needed){
+  
+  names_dt    <- names(data) #tolower(names(data))
+  dt_name     <- deparse(substitute(data))
+  
+  if(all(vars_needed %in% names_dt)){
+    
+    NULL
+    
+  } else {
+    
+    missing_vars <- setdiff(vars_needed, names_dt)
+    
+    error_occurrence("Missing column names in your dataset")
+    
+    validate(
+      
+      glue::glue(
+        "Missing columns in {dt_name}: \n{paste(missing_vars,collapse=', ')}
+        \nHave you uploaded the correct file?"
+      )
+      , errorClass = "col_names"
     )
     
   }
@@ -147,8 +180,10 @@ check_varsOccurrenceFdx2 <- function(data, vars_needed){
     validate(
       
       glue::glue(
-        "Missing columns in {dt_name}: \n{paste(missing_vars,collapse=', ')}"
+        "Missing columns in {dt_name}: \n{paste(missing_vars,collapse=', ')}
+        \nHave you uploaded the correct file?"
       )
+      , errorClass = "col_names"
     )
     
   }
